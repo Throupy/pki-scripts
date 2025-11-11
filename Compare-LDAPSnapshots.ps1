@@ -1,6 +1,12 @@
 # 11/10/2025
 # compare two LDAP snapshotrs, used as part of the PKI investigation for CES and CEP roles with LDAP.
-# usage  C:\Compare-LdifChangesV2.ps1 -BeforeFile .\before_full.ldf -AfterFile .\after_full.ldf 
+# must use ldifde, wish i did it for Get-ADObject but here we are
+# generate the snapshots e.g.
+# ldifde -f "before.ldf" -d "CN=Configuration,DC=<domain>" -l "nTSecurityDescriptor,*"
+# perform action that will make a chance to LDAP
+# ldifde -f "after.ldf" -d "CN=Configuration,DC=<domain>" -l "nTSecurityDescriptor,*"
+
+# then use script like  .\Compare-LDAPSnapshots.ps1 -BeforeFile .\before.ldf -AfterFile .\after.ldf 
 
 
 param (
