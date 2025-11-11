@@ -1,5 +1,7 @@
 # 11/10/2025
 # compare two LDAP snapshotrs, used as part of the PKI investigation for CES and CEP roles with LDAP.
+# usage  C:\Compare-LdifChangesV2.ps1 -BeforeFile .\before_full.ldf -AfterFile .\after_full.ldf 
+
 
 param (
     [Parameter(Mandatory = $true)]
@@ -12,6 +14,37 @@ param (
 Write-Host "[*] Starting LDIF comparison..." -ForegroundColor Cyan
 Write-Host "[*] Before file : $BeforeFile" -ForegroundColor DarkCyan
 Write-Host "[*] After file  : $AfterFile" -ForegroundColor DarkCyan
+
+function Convert-SDBase64ToReadableAcl {
+    param(
+        [string]$Base64
+    )
+    if (-not $Base64) { return @() }
+
+    try {
+        $bytes = [Convert]::FromBase64String($Base64)
+        $ads = New-Object System.DirectoryServices.ActiveDirectorySecurity
+        $ads.SetSecurityDescriptorBinaryForm($bytes)
+
+        $rules = $ads.GetAccessRules($true, $true, [System.Security.Principal.NTAccount])
+        $out = @()
+        foreach ($rule in $rules) {
+            $out += [pscustomobject]@{
+                Identity       = $rule.IdentityReference.Value
+                Type           = $rule.AccessControlType          # all / deny
+                Rights         = $rule.ActiveDirectoryRights      
+                Inheritance    = $rule.InheritanceType
+                ObjectType     = $rule.ObjectType
+                InheritedObjectType = $rule.InheritedObjectType
+                IsInherited    = $rule.IsInherited
+            }
+        }
+        return $out
+    } catch {
+        return @()
+    }
+}
+
 
 if (-not (Test-Path $BeforeFile)) {
     Write-Error "Before file not found: $BeforeFile"
@@ -34,7 +67,6 @@ function Parse-Ldif {
 
     $lines = Get-Content $Path
     foreach ($line in $lines) {
-
         # ldap continuation (folded lines) start with a space, rfc2849
         if ($line -match '^\s' -and $currentAttrName -ne $null -and $currentDN -ne $null) {
             # add to end for new val
@@ -56,17 +88,17 @@ function Parse-Ldif {
         }
 
         # attrbiute line
-        if ($line -match '^(\S+):\s*(.*)$') {
-            $attr = $matches[1]
-            $val  = $matches[2]
+	if ($line -match '^(\S+):{1,2}\s*(.*)$') {
+    	    $attr = $matches[1]
+    	    $val  = $matches[2]
 
-            if (-not $currentAttrs.ContainsKey($attr)) {
-                $currentAttrs[$attr] = @()
-            }
-            $currentAttrs[$attr] += $val
-            $currentAttrName = $attr
-            continue
-        }
+    	    if (-not $currentAttrs.ContainsKey($attr)) {
+        	$currentAttrs[$attr] = @()
+    	    }
+    	    $currentAttrs[$attr] += $val
+    	    $currentAttrName = $attr
+    	    continue
+	}
     }
 
     # ultimate
@@ -141,6 +173,58 @@ foreach ($dn in $allDNs) {
             if (-not $modifiedThisDN) {
                 Write-Host "`n[~] MODIFIED: $dn" -ForegroundColor Yellow
                 $modifiedThisDN = $true
+            } 
+            ## gotta to special handling for nt security descriptor cos need to decode from b64 n parse ACEs
+            # turns out nt security desciptor has 2 colons, so need to explicitly look for 1 of em here
+            if ($attr -eq 'nTSecurityDescriptor:') {
+                $aclBefore = Convert-SDBase64ToReadableAcl $beforeVal
+                $aclAfter  = Convert-SDBase64ToReadableAcl $afterVal
+
+                Write-Host "=====>  Attribute: $attr (ACL)" -ForegroundColor Yellow
+
+                $removed = $aclBefore | Where-Object {
+                    $b = $_
+                    -not ($aclAfter | Where-Object {
+                        $_.Identity -eq $b.Identity -and
+                        $_.Type     -eq $b.Type     -and
+                        $_.Rights   -eq $b.Rights   -and
+                        $_.IsInherited -eq $b.IsInherited
+                    })
+                }
+                if ($removed) {
+                    Write-Host "      Removed ACEs:" -ForegroundColor Red
+                    $removed | ForEach-Object {
+                        Write-Host ("        {0} {1} {2} (Inherited:{3})" -f $_.Identity, $_.Type, $_.Rights, $_.IsInherited)
+                    }
+                }
+
+                # added
+                $added = $aclAfter | Where-Object {
+                    $a = $_
+                    -not ($aclBefore | Where-Object {
+                        $_.Identity -eq $a.Identity -and
+                        $_.Type     -eq $a.Type     -and
+                        $_.Rights   -eq $a.Rights   -and
+                        $_.IsInherited -eq $a.IsInherited
+                    })
+                }
+                if ($added) {
+                    Write-Host "      Added ACEs:" -ForegroundColor Green
+                    $added | ForEach-Object {
+                        Write-Host ("        {0} {1} {2} (Inherited:{3})" -f $_.Identity, $_.Type, $_.Rights, $_.IsInherited)
+                    }
+                }
+
+                # store smth for results anyway
+                $results += [pscustomobject]@{
+                    DN        = $dn
+                    Change    = "Modified"
+                    Attribute = $attr
+                    Before    = ($aclBefore  | Out-String)
+                    After     = ($aclAfter   | Out-String)
+                }
+
+                continue
             }
 
             Write-Host "=====>  Attribute: $attr" -ForegroundColor Yellow
