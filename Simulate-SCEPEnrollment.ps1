@@ -3,7 +3,7 @@
 ## (or as close as possible) to test an NDES instance.
 
 ## example
-# .\Test-NDES.ps1 `
+# .\Simulate-SCEPEnrollment.ps1 `
 #   -ScepUrl "http://pne001/certsrv/mscep/mscep.dll" `
 #   -Otp "FB7D7424C9078C01" `
 #   -OutDir "C:\Users\Administrator\Documents\certout"
