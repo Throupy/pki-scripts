@@ -4,7 +4,7 @@
 
 ## example
 # .\Simulate-SCEPEnrollment.ps1 `
-#   -ScepUrl "http://pne001/certsrv/mscep/mscep.dll" `
+#   -ScepUrl "http://ndes001/certsrv/mscep/mscep.dll" `
 #   -Otp "FB7D7424C9078C01" `
 #   -OutDir "C:\Users\Administrator\Documents\certout"
 
